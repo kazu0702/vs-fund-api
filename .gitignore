@@ -1,0 +1,17 @@
+# node.jsの依存
+node_modules/
+
+# 秘密情報
+.env
+
+# ログ
+*.log
+
+# mac特有の隠しファイル
+.DS_Store
+
+# Windowsの不要ファイル
+Thumbs.db
+
+# VSCodeの設定（必要に応じて）
+.vscode/
