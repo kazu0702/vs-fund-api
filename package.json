@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/kazu0702/vs-fund-api#readme",
   "dependencies": {
+    "cors": "^2.8.5",
     "dotenv": "^16.6.0",
     "express": "^5.1.0",
     "stripe": "^18.2.1"
