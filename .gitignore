@@ -15,7 +15,3 @@ Thumbs.db
 
 # VSCodeの設定（必要に応じて）
 .vscode/
-
-test
-testOK
-testNG
