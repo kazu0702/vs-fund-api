@@ -2,7 +2,7 @@
 node_modules/
 
 # 秘密情報
-.env
+env/.env
 
 # ログ
 *.log
