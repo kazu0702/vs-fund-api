@@ -1,3 +1,5 @@
+console.log("[DEBUG] server.js STARTED");
+
 const path   = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, "..", "env", ".env") });
 
