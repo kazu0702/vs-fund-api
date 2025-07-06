@@ -1,15 +1,10 @@
-const { emailChange } = require("../models");  // MongoDB / Prisma など
+// const { emailChange } = require("../models");  // ← DB 実装までは無効化
 
 exports.confirmEmailChange = async (req, res) => {
+  // token が無い、または DB がまだ無い場合は false を返す
   const { token } = req.query;
   if (!token) return res.json({ ok: false });
 
-  const rec = await emailChange.findOne({ token, expires: { $gt: Date.now() } });
-  if (!rec) return res.json({ ok: false });
-
-  // トークン無効化
-  await emailChange.deleteOne({ token });
-
-  // フロントへ新メールを返す
-  res.json({ ok: true, newEmail: rec.newEmail });
+  // まだ DB 未接続なので常に失敗
+  return res.json({ ok: false });
 };
