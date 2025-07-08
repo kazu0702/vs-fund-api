@@ -2,7 +2,7 @@ console.log("[DEBUG] server.js STARTED");
 
 const path   = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, "..", "env", ".env") });
-
+require("./db")
 const express = require("express");
 const cors    = require("cors");
 const stripe  = require("stripe")(process.env.STRIPE_SECRET_KEY);
