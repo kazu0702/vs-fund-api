@@ -21,3 +21,11 @@ router.use("/emailChange", require("./emailChange"));
 // router.use("/billing", require("./billing"));
 
 module.exports = router;
+
+// src/routes/index.js など
+router.get("/ping-db", async (_, res) => {
+  const db = require("../db");
+  const { rows } = await db.query("SELECT NOW() AS now");
+  res.json(rows[0]);           // { "now": "2025-07-08T07:30:00.000Z" }
+});
+
