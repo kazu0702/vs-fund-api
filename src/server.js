@@ -3,6 +3,9 @@ console.log("[DEBUG] server.js STARTED");
 const path   = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, "..", "env", ".env") });
 require("./db")
+const clean = require("./cleanup");
+clean();                            //起動直後に 1 回だけ実行
+setInterval(clean, 60 * 60 * 1000); //1 時間 (=3 600 000 ms) ごと
 const express = require("express");
 const cors    = require("cors");
 const stripe  = require("stripe")(process.env.STRIPE_SECRET_KEY);
