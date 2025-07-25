@@ -2,6 +2,7 @@
 const router = require("express").Router();
 const db     = require("../db");
 const crypto = require("crypto");
+const { confirmEmailChange } = require("../controllers/emailChangeController");
 
 router.post("/request", async (req, res) => {
   const { userId, newEmail } = req.body;
@@ -19,7 +20,7 @@ router.post("/request", async (req, res) => {
   // ============= 認証メール送信（SendGrid 例） =============
   // const sgMail = require("@sendgrid/mail");
   // sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-  // const confirmUrl = `https://izokukikin.webflow.io/email-change-confirm?token=${token}`;
+  // const confirmUrl = `https://vsfund.webflow.io/email-change-confirm?token=${token}`;
   // await sgMail.send({
   //   to: newEmail,
   //   from: "no-reply@vs-fund.or.jp",
@@ -31,5 +32,9 @@ router.post("/request", async (req, res) => {
 
   res.json({ ok:true });
 });
+
+// ★追加：GET /api/emailChange/confirm?token=xxxx
+router.get("/confirm", confirmEmailChange);
+
 
 module.exports = router;
