@@ -15,7 +15,7 @@ app.use(express.json());
 
 // Webflow からのアクセスのみ許可（GET も追加）
 app.use(cors({
-  origin: ["https://izokukikin.webflow.io"],
+  origin: ["https://vsfund.webflow.io"],
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type"]
 }));
