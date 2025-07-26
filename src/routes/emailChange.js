@@ -1,15 +1,16 @@
 // src/routes/emailChange.js
-const router = require("express").Router();
-const db     = require("../db");
-const crypto = require("crypto");
+const router  = require("express").Router();
+const db      = require("../db");
+const crypto  = require("crypto");
 const { confirmEmailChange } = require("../controllers/emailChangeController");
 
+/* ① リクエスト受付 */
 router.post("/request", async (req, res) => {
   const { userId, newEmail } = req.body;
-  if (!userId || !newEmail) return res.status(400).json({ ok:false });
+  if(!userId || !newEmail) return res.status(400).json({ ok:false });
 
   const token   = crypto.randomUUID();
-  const expires = new Date(Date.now() + 1000*60*60); // 1 時間
+  const expires = new Date(Date.now() + 60*60*1000);   // 1h
 
   await db.query(
     `INSERT INTO email_change(token,user_id,new_email,expires_at)
@@ -17,24 +18,14 @@ router.post("/request", async (req, res) => {
     [token, userId, newEmail, expires]
   );
 
-  // ============= 認証メール送信（SendGrid 例） =============
-  // const sgMail = require("@sendgrid/mail");
-  // sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  /* ここで SendGrid を呼び出して確認メールを送信 */
   // const confirmUrl = `https://vsfund.webflow.io/email-change-confirm?token=${token}`;
-  // await sgMail.send({
-  //   to: newEmail,
-  //   from: "no-reply@vs-fund.or.jp",
-  //   subject: "メールアドレス変更の確認",
-  //   html: `<p>下記リンクをクリックして変更を完了してください。</p>
-  //          <a href="${confirmUrl}">${confirmUrl}</a>`
-  // });
-  // =========================================================
+  // …sgMail.send({ to:newEmail, … })
 
   res.json({ ok:true });
 });
 
-// ★追加：GET /api/emailChange/confirm?token=xxxx
+/* ② 確認リンク (GET) */
 router.get("/confirm", confirmEmailChange);
-
 
 module.exports = router;
