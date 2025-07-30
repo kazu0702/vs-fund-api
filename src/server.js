@@ -32,7 +32,7 @@ app.use(cors({
   allowedHeaders: ["Content-Type"],
   maxAge: 86400
 }));
-app.options("*", cors());
+app.options("/*", cors());  
 
 /*─ ルーティング ─*/
 app.use("/api", require("./routes"));      // emailChange など
