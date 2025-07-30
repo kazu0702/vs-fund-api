@@ -6,6 +6,7 @@ const { confirmEmailChange } = require("../controllers/emailChangeController");
 
 /* ① リクエスト受付 */
 router.post("/request", async (req, res) => {
+  console.log("[DEBUG] /emailChange/request", req.body);
   const { userId, newEmail } = req.body;
   if(!userId || !newEmail) return res.status(400).json({ ok:false });
 
