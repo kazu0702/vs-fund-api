@@ -25,5 +25,8 @@
     "express-list-endpoints": "^7.1.1",
     "pg": "^8.16.3",
     "stripe": "^18.2.1"
-  }
+  },
+  "engines": {
+  "node": "20.x"
+}
 }
