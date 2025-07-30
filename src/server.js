@@ -41,7 +41,7 @@ app.post("/api/change-plan", changePlan);  // Stripe プラン変更
 app.get("/", (_, res) => res.send("VS-FUND API running"));
 
 /*─ サーバー起動 ─*/
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 app.listen(PORT, () => console.log(`Listen on ${PORT}`));
 
 /*-----------------------------------------------
