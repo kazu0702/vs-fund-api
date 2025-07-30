@@ -28,11 +28,10 @@ const ORIGIN = "https://vsfund.webflow.io";
 app.use(cors({
   origin: ORIGIN,
   credentials: true,
-  methods: ["GET","POST","OPTIONS"],
+  methods: ["GET","POST"],
   allowedHeaders: ["Content-Type"],
   maxAge: 86400
 }));
-app.options("/*", cors());  
 
 /*─ ルーティング ─*/
 app.use("/api", require("./routes"));      // emailChange など
