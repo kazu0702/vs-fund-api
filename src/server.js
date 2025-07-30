@@ -1,6 +1,10 @@
 /*************************************************
  * VS-FUND API – server.js
  *************************************************/
+process.on("uncaughtException", function (err) {
+  console.error("UNCAUGHT EXCEPTION:", err.stack);
+});
+
 console.log("[DEBUG] server.js STARTED");
 
 require("dotenv").config();          // ルートの .env を読む
