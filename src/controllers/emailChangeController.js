@@ -1,7 +1,9 @@
 // src/controllers/emailChangeController.js
 const db = require("../db");
-const memberstack = require("@memberstack/admin");      // npm i @memberstack/admin
-memberstack.init({ secret: process.env.MS_SECRET });
+const Memberstack = require("@memberstack/admin");
+const memberstack = Memberstack.init({
+  secret: process.env.MS_SECRET
+});
 
 exports.confirmEmailChange = async (req, res) => {
   const { token } = req.query;
