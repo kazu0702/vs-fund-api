@@ -6,6 +6,10 @@ process.on("uncaughtException", function (err) {
 });
 
 console.log("[DEBUG] server.js STARTED");
+// src/server.js の先頭など一時的に置く
+console.log('[DEBUG] MS_SECRET →', JSON.stringify(process.env.MS_SECRET));
+console.log('[DEBUG] length     →', process.env.MS_SECRET.length);
+
 
 require("dotenv").config();          // ルートの .env を読む
 require("./db");                     // Postgres 接続
