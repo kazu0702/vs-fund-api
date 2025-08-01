@@ -18,6 +18,7 @@ memberstack.init({
   appId : process.env.MS_APP_ID,
 });
 
+
 /**
  * GET /api/emailChange/confirm?token=xxxxx
  */
