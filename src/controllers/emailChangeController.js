@@ -37,19 +37,20 @@ exports.confirmEmailChange = async (req, res) => {
 
   if (!rows.length) return res.json({ ok: false }); // 無効 or 期限切れ
 
-  const { user_id, new_email } = rows[0];
+  const rec = rows[0];
 
   try {
-    // 2️⃣ Memberstack のメールアドレスを更新
+    // ここで memberstack.members が存在するか念のため確認
+    if (!memberstack.members) throw new Error("Memberstack not initialized");
+
     await memberstack.members.update({
-      id:   user_id,
-      data: { email: new_email },
+      id:   rec.user_id,
+      data: { email: rec.new_email }
     });
 
     return res.json({ ok: true });
   } catch (err) {
     console.error("[emailChange] MS update failed:", err);
-    // ロールバックしたい場合はここで email_change にレコードを戻すなど
     return res.status(400).json({ ok: false, message: err.message });
   }
 };
