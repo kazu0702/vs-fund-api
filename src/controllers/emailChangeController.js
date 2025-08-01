@@ -20,7 +20,7 @@ exports.confirmEmailChange = async (req, res) => {
   const rec = rows[0];
 
   try {
-    await memberstack.members.update({ id: rec.user_id, email: rec.new_email });
+    await memberstack.members.update({ id: rec.user_id, data: { email: rec.new_email } });
     return res.json({ ok: true });
   } catch (err) {
     console.error("[emailChange] MS update failed:", err);
