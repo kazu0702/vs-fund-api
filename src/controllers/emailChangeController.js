@@ -29,9 +29,8 @@ exports.confirmEmailChange = async (req, res) => {
   // 1️⃣ トークンが有効か検証しつつ削除（ワンタイムにする）
   const { rows } = await db.query(
     `DELETE FROM email_change
-      WHERE token     = $1
-        AND expires_at > NOW()
-    RETURNING user_id, new_email;`,
+     WHERE token = $1 AND expires_at > NOW()
+     RETURNING user_id, new_email;`,
     [token]
   );
 
