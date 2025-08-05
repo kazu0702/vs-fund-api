@@ -14,7 +14,7 @@ const memberstack  = require("@memberstack/admin");
 
 // Admin SDK を初期化（必ず secret と appId の両方を渡すこと！）
 memberstack.init({
-  secret: process.env.MS_SECRET,
+  secretKey: process.env.MS_SECRET,
   appId : process.env.MS_APP_ID,
 });
 
