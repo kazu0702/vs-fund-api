@@ -18,6 +18,10 @@ memberstack.init({
   appId : process.env.MS_APP_ID,
 });
 
+console.log(
+  "[DEBUG] Memberstack.members keys:",
+  Object.keys(memberstack.members || {})
+);
 
 /**
  * GET /api/emailChange/confirm?token=xxxxx
