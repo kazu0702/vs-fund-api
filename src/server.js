@@ -28,7 +28,7 @@ const app = express();
 app.use(express.json());
 
 /*─ CORS: Webflow だけ許可 & Cookie 対応 ─*/
-const ORIGIN = "https://vsfund.webflow.io";
+const ORIGIN = "https://hau2tdnn1x.webflow.io";
 app.use(cors({
   origin: ORIGIN,
   credentials: true,
