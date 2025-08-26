@@ -42,9 +42,6 @@ app.use("/api", require("./routes"));      // emailChange など
 app.post("/api/change-plan", changePlan);  // Stripe プラン変更
 
 /*─ 動作確認 ─*/
-app.get("/", (_, res) => res.send("VS-FUND API running"));
-
-// ヘルスチェック（Render用）
 app.get('/healthz', (_req, res) => {
   res.status(200).type('text/plain').send('ok');
 });
