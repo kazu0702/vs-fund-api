@@ -47,8 +47,8 @@ app.get('/healthz', (_req, res) => {
 });
 
 /*─ サーバー起動 ─*/
-const PORT = process.env.PORT;
-app.listen(PORT, () => console.log(`Listen on ${PORT}`));
+const PORT = Number(process.env.PORT || 3000);
+app.listen(PORT, "0.0.0.0", () => console.log(`Ready on ${PORT}`));
 
 /*-----------------------------------------------
   Stripe プラン変更ハンドラ
