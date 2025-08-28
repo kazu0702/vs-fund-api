@@ -1,18 +1,42 @@
 /*************************************************
- * VS-FUND API – server.js
+ * VS-FUND API – server.js (robust env & debug)
  *************************************************/
-process.on("uncaughtException", function (err) {
-  console.error("UNCAUGHT EXCEPTION:", err.stack);
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err && err.stack || err);
 });
 
 console.log("[DEBUG] server.js STARTED");
-// src/server.js の先頭など一時的に置く
-console.log('[DEBUG] MS_SECRET →', JSON.stringify(process.env.MS_SECRET));
-console.log('[DEBUG] length     →', process.env.MS_SECRET.length);
 
+/*─ .env 読み込み（env/.env 優先 → なければ直下 .env） ─*/
+const fs   = require("fs");
+const path = require("path");
+let loadedEnvPath = null;
+const candidates = [
+  path.resolve(__dirname, "..", "env", ".env"), // 以前の構成
+  path.resolve(process.cwd(), ".env"),          // プロジェクト直下
+];
+for (const p of candidates) {
+  if (fs.existsSync(p)) {
+    require("dotenv").config({ path: p });
+    loadedEnvPath = p;
+    break;
+  }
+}
+if (!loadedEnvPath) {
+  // CI / Render 等で環境変数を直接注入しているパターン
+  require("dotenv").config(); // 最後に一応デフォルトも試す
+}
+console.log("[ENV] loaded from:", loadedEnvPath || "process env");
 
-require("dotenv").config();          // ルートの .env を読む
-require("./db");                     // Postgres 接続
+/*─ 主要キーの有無だけログ（値は出さない） ─*/
+const has = (k) => (process.env[k] && process.env[k].length ? "set" : "missing");
+console.log("[ENV] SENDGRID_API_KEY:", has("SENDGRID_API_KEY"));
+console.log("[ENV] MS_SECRET       :", has("MS_SECRET"));
+console.log("[ENV] STRIPE_SECRET_KEY:", has("STRIPE_SECRET_KEY"));
+console.log("[ENV] DATABASE_URL    :", has("DATABASE_URL"));
+
+/*─ DB 接続 ─*/
+require("./db");  // Postgres 接続（失敗時はプロセス終了）
 
 /*─ 定期クリーンアップ ─*/
 const clean = require("./cleanup");
@@ -27,12 +51,12 @@ const stripe  = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const app = express();
 app.use(express.json());
 
-/*─ CORS: Webflow だけ許可 & Cookie 対応 ─*/
-const ORIGIN = "https://hau2tdnn1x.webflow.io";
+/*─ CORS: Webflow だけ許可 ─*/
+const ORIGIN = "https://hau2tdnn1x.webflow.io"; // ← 新ドメイン
 app.use(cors({
   origin: ORIGIN,
   credentials: true,
-  methods: ["GET","POST"],
+  methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type"],
   maxAge: 86400
 }));
@@ -41,9 +65,43 @@ app.use(cors({
 app.use("/api", require("./routes"));      // emailChange など
 app.post("/api/change-plan", changePlan);  // Stripe プラン変更
 
-/*─ 動作確認 ─*/
-app.get('/healthz', (_req, res) => {
-  res.status(200).type('text/plain').send('ok');
+/*─ 健康チェック ─*/
+app.get("/healthz", (_req, res) => {
+  res.status(200).type("text/plain").send("ok");
+});
+
+/*───────────────────────────────────────────────
+  ★ SendGrid 単体スモークテスト（暫定）
+  curl 例:
+  curl -X POST http://localhost:3000/api/_debug/sendgrid \
+    -H "Content-Type: application/json" \
+    -d '{"to":"you@example.com"}'
+───────────────────────────────────────────────*/
+app.post("/api/_debug/sendgrid", async (req, res) => {
+  try {
+    const { to } = req.body || {};
+    if (!to) return res.status(400).json({ ok:false, error:"'to' is required" });
+
+    if (!process.env.SENDGRID_API_KEY) {
+      return res.status(500).json({ ok:false, error:"SENDGRID_API_KEY is missing" });
+    }
+    const sgMail = require("@sendgrid/mail");
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
+    await sgMail.send({
+      to,
+      from: { email: "k-hirai@hirai-syoji.com", name: "Victim Support Fund（VSファンド）" },
+      replyTo: { email: "k-hirai@hirai-syoji.com", name: "Victim Support Fund（VSファンド）" },
+      subject: "VSファンド デバッグ送信",
+      text: "このメールが届けば SendGrid とAPIキーは有効です。",
+    });
+
+    console.log("[_debug/sendgrid] sent to:", to);
+    res.json({ ok:true });
+  } catch (err) {
+    console.error("[_debug/sendgrid] error:", err.response?.body || err);
+    res.status(500).json({ ok:false, error: err.response?.body || err.message });
+  }
 });
 
 /*─ サーバー起動 ─*/
