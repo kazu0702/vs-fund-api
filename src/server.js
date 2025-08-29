@@ -28,10 +28,16 @@ if (!loadedEnvPath) {
 }
 console.log("[ENV] loaded from:", loadedEnvPath || "process env");
 
-/*─ 主要キーの有無だけログ（値は出さない） ─*/
+/*─ 主要キーの有無＋長さだけログ（値は出さない） ─*/
 const has = (k) => (process.env[k] && process.env[k].length ? "set" : "missing");
-console.log("[ENV] SENDGRID_API_KEY:", has("SENDGRID_API_KEY"));
-console.log("[ENV] MS_SECRET       :", has("MS_SECRET"));
+const _sec = process.env.MS_SECRET || "";
+const _app = process.env.MS_APP_ID || "";
+console.log("[ENV] SENDGRID_API_KEY :", has("SENDGRID_API_KEY"));
+console.log("[ENV] MS_APP_ID       :", _app ? `set(len=${_app.length})` : "missing");
+console.log("[ENV] MS_SECRET       :", _sec ? `set(len=${_sec.length})` : "missing");
+if (_sec) {
+  console.log("[ENV] MS_SECRET head/tail:", _sec.slice(0, 6) + "..." + _sec.slice(-4));
+}
 console.log("[ENV] STRIPE_SECRET_KEY:", has("STRIPE_SECRET_KEY"));
 console.log("[ENV] DATABASE_URL    :", has("DATABASE_URL"));
 
@@ -46,24 +52,22 @@ setInterval(clean, 60 * 60 * 1000);  // 1h ごと
 /*─ ミドルウェア ─*/
 const express = require("express");
 const cors    = require("cors");
-const stripe  = require("stripe")(process.env.STRIPE_SECRET_KEY);
-
 const app = express();
 app.use(express.json());
 
-/*─ CORS: Webflow だけ許可 ─*/
-const ORIGIN = "https://hau2tdnn1x.webflow.io"; // ← 新ドメイン
+/*─ CORS: Webflow だけ許可（ENV優先 / 既定は新ドメイン） ─*/
+const ORIGIN = process.env.ORIGIN || "https://hau2tdnn1x.webflow.io";
+console.log("[ENV] CORS ORIGIN:", ORIGIN);
 app.use(cors({
   origin: ORIGIN,
   credentials: true,
-  methods: ["GET", "POST"],
+  methods: ["GET","POST"],
   allowedHeaders: ["Content-Type"],
   maxAge: 86400
 }));
 
 /*─ ルーティング ─*/
 app.use("/api", require("./routes"));      // emailChange など
-app.post("/api/change-plan", changePlan);  // Stripe プラン変更
 
 /*─ 健康チェック ─*/
 app.get("/healthz", (_req, res) => {
@@ -94,6 +98,8 @@ app.post("/api/_debug/sendgrid", async (req, res) => {
       replyTo: { email: "k-hirai@hirai-syoji.com", name: "Victim Support Fund（VSファンド）" },
       subject: "VSファンド デバッグ送信",
       text: "このメールが届けば SendGrid とAPIキーは有効です。",
+      // 追跡リンク無効化（任意）
+      mailSettings: { clickTracking: { enable: false, enableText: false } }
     });
 
     console.log("[_debug/sendgrid] sent to:", to);
@@ -104,16 +110,51 @@ app.post("/api/_debug/sendgrid", async (req, res) => {
   }
 });
 
-/*─ サーバー起動 ─*/
-const PORT = Number(process.env.PORT || 3000);
-app.listen(PORT, "0.0.0.0", () => console.log(`Ready on ${PORT}`));
+/*───────────────────────────────────────────────
+  ★ Memberstack キー整合チェック（取得のみ / 安全）
+  curl 例:
+  curl -X POST http://localhost:3000/api/_debug/memberstack \
+    -H "Content-Type: application/json" \
+    -d '{"memberId":"mem_sb_xxx"}'
+───────────────────────────────────────────────*/
+app.post("/api/_debug/memberstack", async (req, res) => {
+  try {
+    const { memberId } = req.body || {};
+    if (!memberId) return res.status(400).json({ ok:false, error:"'memberId' is required" });
+
+    const MemberstackAdmin = require("@memberstack/admin");
+    // 公式推奨：init は secret 文字列だけ渡す
+    const ms = MemberstackAdmin.init(process.env.MS_SECRET);
+
+    // retrieve で存在確認（鍵・サイト・モードの整合検査）
+    const m = await ms.members.retrieve({ id: memberId });
+    return res.json({ ok:true, id: m.id });
+  } catch (err) {
+    // 代表的なエラーだけメッセージを整える
+    const code = err?.code || err?.name || "unknown";
+    const msg  = err?.message || String(err);
+    console.error("[_debug/memberstack] error:", code, msg);
+    return res.status(500).json({ ok:false, code, error: msg });
+  }
+});
 
 /*-----------------------------------------------
   Stripe プラン変更ハンドラ
 -----------------------------------------------*/
+const stripe = process.env.STRIPE_SECRET_KEY ? require("stripe")(process.env.STRIPE_SECRET_KEY) : null;
+
+app.post("/api/change-plan", changePlan);
+
 async function changePlan(req, res){
   try{
-    const { customerId, newPriceId } = req.body;
+    if (!stripe) {
+      return res.status(500).json({ error:"STRIPE_SECRET_KEY is missing" });
+    }
+    const { customerId, newPriceId } = req.body || {};
+    if (!customerId || !newPriceId) {
+      return res.status(400).json({ error:"customerId and newPriceId are required" });
+    }
+
     const subs = await stripe.subscriptions.list({
       customer: customerId, status:"active", limit:1
     });
@@ -126,7 +167,11 @@ async function changePlan(req, res){
     });
     res.json({ success:true, subscription:updated });
   }catch(err){
-    console.error(err);
+    console.error("[change-plan] error:", err);
     res.status(500).json({ error:err.message });
   }
 }
+
+/*─ サーバー起動 ─*/
+const PORT = Number(process.env.PORT || 3000);
+app.listen(PORT, "0.0.0.0", () => console.log(`Ready on ${PORT}`));
