@@ -15,7 +15,7 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 router.post("/request", async (req, res) => {
   try {
     console.log("[DEBUG] /emailChange/request", req.body);
-    const { userId, newEmail } = req.body;
+    const { userId, newEmail } = req.body; // フロントは userId のままでOK
     if (!userId || !newEmail) {
       return res.status(400).json({ ok:false, error: "userId and newEmail are required" });
     }
@@ -23,8 +23,9 @@ router.post("/request", async (req, res) => {
     const token   = crypto.randomUUID();
     const expires = new Date(Date.now() + 60*60*1000);   // 1 時間
 
+    // ★DBのカラム名に合わせる：member_id
     await db.query(
-      `INSERT INTO email_change(token,user_id,new_email,expires_at)
+      `INSERT INTO email_change(token, member_id, new_email, expires_at)
        VALUES ($1,$2,$3,$4)`,
       [token, userId, newEmail, expires]
     );
@@ -32,17 +33,11 @@ router.post("/request", async (req, res) => {
     // 確認リンク（Webflowの新ドメイン）
     const confirmUrl = `https://hau2tdnn1x.webflow.io/email-change-confirm?token=${token}`;
 
-    // ★SendGridで送信（送信元・返信先ともに認証済みの同一アドレスを使用）
+    // 送信（送信元・返信先ともに認証済みアドレス）
     await sgMail.send({
       to: newEmail,
-      from: {
-        email: "k-hirai@hirai-syoji.com",
-        name: "Victim Support Fund（VSファンド）"
-      },
-      replyTo: {
-        email: "k-hirai@hirai-syoji.com",
-        name: "Victim Support Fund（VSファンド）"
-      },
+      from: { email: "k-hirai@hirai-syoji.com", name: "Victim Support Fund（VSファンド）" },
+      replyTo: { email: "k-hirai@hirai-syoji.com", name: "Victim Support Fund（VSファンド）" },
       subject: "メールアドレス変更の確認",
       html: `<p>下記リンクをクリックして変更を完了してください。</p>
              <p><a href="${confirmUrl}">${confirmUrl}</a></p>
@@ -52,6 +47,9 @@ router.post("/request", async (req, res) => {
     console.log("[emailChange] Sent email:", confirmUrl);
     res.json({ ok:true });
   } catch (err) {
+    if (err.response && err.response.body) {
+      console.error("[emailChange] SendGrid error body:", err.response.body);
+    }
     console.error("[emailChange] Error:", err);
     res.status(500).json({ ok:false, error: err.message });
   }
