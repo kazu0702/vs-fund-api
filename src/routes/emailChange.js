@@ -8,48 +8,61 @@ const { confirmEmailChange } = require("../controllers/emailChangeController");
 const sgMail = require("@sendgrid/mail");
 if (!process.env.SENDGRID_API_KEY) {
   console.warn("[WARN] SENDGRID_API_KEY is not set. Emails will fail.");
+} else {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 }
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 /* ① 変更リクエスト受付 ------------------------------------ */
 router.post("/request", async (req, res) => {
   try {
     console.log("[DEBUG] /emailChange/request", req.body);
-    const { userId, newEmail } = req.body; // フロントは userId のままでOK
-    if (!userId || !newEmail) {
-      return res.status(400).json({ ok:false, error: "userId and newEmail are required" });
+
+    // userId でも memberId でも受ける（どちらか必須）
+    const { userId, memberId, newEmail } = req.body || {};
+    const id = userId || memberId;
+    if (!id || !newEmail) {
+      return res.status(400).json({ ok:false, error: "memberId(or userId) and newEmail are required" });
     }
 
     const token   = crypto.randomUUID();
     const expires = new Date(Date.now() + 60*60*1000);   // 1 時間
 
-    // ★DBのカラム名に合わせる：member_id
+    // DB のカラム名に合わせて member_id を使用
     await db.query(
-      `INSERT INTO email_change(token, member_id, new_email, expires_at)
+      `INSERT INTO email_change (token, member_id, new_email, expires_at)
        VALUES ($1,$2,$3,$4)`,
-      [token, userId, newEmail, expires]
+      [token, id, newEmail, expires]
     );
 
     // 確認リンク（Webflowの新ドメイン）
     const confirmUrl = `https://hau2tdnn1x.webflow.io/email-change-confirm?token=${token}`;
 
-    // 送信（送信元・返信先ともに認証済みアドレス）
-    await sgMail.send({
-      to: newEmail,
-      from: { email: "k-hirai@hirai-syoji.com", name: "Victim Support Fund（VSファンド）" },
-      replyTo: { email: "k-hirai@hirai-syoji.com", name: "Victim Support Fund（VSファンド）" },
-      subject: "メールアドレス変更の確認",
-      html: `<p>下記リンクをクリックして変更を完了してください。</p>
-             <p><a href="${confirmUrl}">${confirmUrl}</a></p>
-             <p>※このリンクは1時間で期限切れになります。</p>`
-    });
+    // 送信（認証済み送信者を利用）
+    if (process.env.SENDGRID_API_KEY) {
+      await sgMail.send({
+        to: newEmail,
+        from: {
+          email: "k-hirai@hirai-syoji.com",
+          name: "Victim Support Fund（VSファンド）"
+        },
+        replyTo: {
+          email: "k-hirai@hirai-syoji.com",
+          name: "Victim Support Fund（VSファンド）"
+        },
+        subject: "メールアドレス変更の確認",
+        html: `<p>下記リンクをクリックして変更を完了してください。</p>
+               <p><a href="${confirmUrl}">${confirmUrl}</a></p>
+               <p>※このリンクは1時間で期限切れになります。</p>`,
+        // 追跡リンク無効化（URL改変防止・任意）
+        mailSettings: { clickTracking: { enable: false, enableText: false } }
+      });
+      console.log("[emailChange] Sent email:", confirmUrl);
+    } else {
+      console.warn("[WARN] SENDGRID_API_KEY missing, skipped email. URL:", confirmUrl);
+    }
 
-    console.log("[emailChange] Sent email:", confirmUrl);
     res.json({ ok:true });
   } catch (err) {
-    if (err.response && err.response.body) {
-      console.error("[emailChange] SendGrid error body:", err.response.body);
-    }
     console.error("[emailChange] Error:", err);
     res.status(500).json({ ok:false, error: err.message });
   }
