@@ -2,10 +2,10 @@
 const router = require("express").Router();
 const db     = require("../db");
 const crypto = require("crypto");
-const memberstack = require("@memberstack/admin");
+const MemberstackAdmin = require("@memberstack/admin");
 
 // Memberstack Admin 初期化（環境変数 MS_SECRET 必須）
-memberstack.init({ secret: process.env.MS_SECRET });
+const ms = MemberstackAdmin.init(process.env.MS_SECRET);
 
 /**
  * 1) 変更リクエスト発行
@@ -13,11 +13,12 @@ memberstack.init({ secret: process.env.MS_SECRET });
  * body: { userId, newEmail }
  * - ランダムなトークンを発行して email_change テーブルに保存
  * - （任意）SendGrid 等で確認メール送信
+ * - DEBUG_EMAIL_CHANGE=true のときのみ token を返す（開発用）
  */
 router.post("/request", async (req, res) => {
   try {
     const { userId, newEmail } = req.body;
-    if (!userId || !newEmail) return res.status(400).json({ ok: false, error: "missing_params" });
+    if (!userId || !newEmail) return res.status(400).json({ ok:false, error:"missing_params" });
 
     const token   = crypto.randomUUID();
     const expires = new Date(Date.now() + 1000 * 60 * 60); // 1時間
@@ -41,10 +42,11 @@ router.post("/request", async (req, res) => {
     // });
     // ================================================
 
-    return res.json({ ok: true });
+    const debug = process.env.DEBUG_EMAIL_CHANGE === "true";
+    return res.json(debug ? { ok:true, token } : { ok:true });
   } catch (err) {
     console.error("[emailChange/request] error:", err);
-    return res.status(500).json({ ok: false, error: "server_error" });
+    return res.status(500).json({ ok:false, error:"server_error" });
   }
 });
 
@@ -58,9 +60,8 @@ router.post("/request", async (req, res) => {
 router.get("/confirm", async (req, res) => {
   try {
     const { token } = req.query;
-    if (!token) return res.status(400).json({ ok: false, reason: "missing_token" });
+    if (!token) return res.status(400).json({ ok:false, reason:"missing_token" });
 
-    // 有効トークンを取り出して同時に削除（1回限り）
     const { rows } = await db.query(
       `DELETE FROM email_change
          WHERE token = $1
@@ -70,18 +71,16 @@ router.get("/confirm", async (req, res) => {
     );
 
     if (rows.length === 0) {
-      return res.status(400).json({ ok: false, reason: "invalid_or_expired" });
+      return res.status(400).json({ ok:false, reason:"invalid_or_expired" });
     }
 
     const rec = rows[0];
+    await ms.members.update({ id: rec.user_id, email: rec.new_email });
 
-    // Memberstack のメール更新
-    await memberstack.members.update({ id: rec.user_id, email: rec.new_email });
-
-    return res.json({ ok: true });
+    return res.json({ ok:true });
   } catch (err) {
     console.error("[emailChange/confirm] error:", err);
-    return res.status(500).json({ ok: false, reason: "server_error" });
+    return res.status(500).json({ ok:false, reason:"server_error" });
   }
 });
 
