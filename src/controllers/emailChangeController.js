@@ -2,16 +2,15 @@
 const db = require("../db");
 const MemberstackAdmin = require("@memberstack/admin");
 
-// Admin SDK 初期化（公式推奨のオブジェクト引数）
-const ms = MemberstackAdmin.init({ secret: process.env.MS_SECRET });
+// ← 文字列で初期化（peek と同じ方式に統一）
+const ms = MemberstackAdmin.init(process.env.MS_SECRET);
 
 /**
  * GET /api/emailChange/confirm?token=...&r=1&d=1
  * - token が有効なら Memberstack の email を更新
  * - まず { email } 単体で更新 → 反映を確認
- * - 反映されなければ { auth: { email } } も試す（2系プロパティ）
- * - デバッグ時(d=1)は Memberstack からの戻り値(payload)も返す
- * - 反映未確認のときはトークンを消さずに残す（再実行できるように）
+ * - 反映されなければ { auth: { email } } も試す
+ * - d=1 でデバッグ（payload/err も返す）。反映できなければトークンは残す
  */
 exports.confirmEmailChange = async (req, res) => {
   const { token, r, d } = req.query || {};
@@ -36,7 +35,7 @@ exports.confirmEmailChange = async (req, res) => {
   try {
     if (!token) return sendFail("missing_token");
 
-    // 有効トークンを取得
+    // 有効トークン読込
     const sel = await db.query(
       `SELECT user_id, new_email
          FROM email_change
@@ -49,7 +48,7 @@ exports.confirmEmailChange = async (req, res) => {
     const userId = sel.rows[0].user_id;
     const setTo  = sel.rows[0].new_email;
 
-    // 更新前メール
+    // 現在メールの取得関数
     const getEmail = async () => {
       try {
         const r = await ms.members.retrieve({ id: userId });
@@ -59,7 +58,7 @@ exports.confirmEmailChange = async (req, res) => {
 
     const beforeEmail = await getEmail();
 
-    // 方式A：{ email } 単体（1系互換）
+    // 方式A：email 単体（1系互換）
     let aErr = null, aPayload = null;
     try {
       aPayload = await ms.members.update({ id: userId, email: setTo });
@@ -67,21 +66,19 @@ exports.confirmEmailChange = async (req, res) => {
       aErr = e?.message || String(e);
     }
 
-    await new Promise(s => setTimeout(s, 600)); // 伝播待ち
+    await new Promise(s => setTimeout(s, 600));
     let afterEmail = await getEmail();
 
-    // A で反映されていれば終了
     if (afterEmail === setTo) {
       await db.query(`DELETE FROM email_change WHERE token = $1`, [token]);
       if (wantRedirect && !debug) return res.redirect(302, SUCCESS_URL);
       return res.json(
-        debug
-          ? { ok:true, userId, beforeEmail, afterEmail, setTo, tried:"A(email)", aErr, aPayload }
-          : { ok:true }
+        debug ? { ok:true, userId, beforeEmail, afterEmail, setTo, tried:"A(email)", aErr, aPayload }
+              : { ok:true }
       );
     }
 
-    // 方式B：{ auth: { email } }（2系プロパティ）
+    // 方式B：auth.email（2系）
     let bErr = null, bPayload = null;
     try {
       bPayload = await ms.members.update({ id: userId, auth: { email: setTo } });
@@ -96,14 +93,15 @@ exports.confirmEmailChange = async (req, res) => {
       await db.query(`DELETE FROM email_change WHERE token = $1`, [token]);
       if (wantRedirect && !debug) return res.redirect(302, SUCCESS_URL);
       return res.json(
-        debug
-          ? { ok:true, userId, beforeEmail, afterEmail, setTo, tried:"A→B", aErr, bErr, aPayload, bPayload }
-          : { ok:true }
+        debug ? { ok:true, userId, beforeEmail, afterEmail, setTo, tried:"A→B", aErr, bErr, aPayload, bPayload }
+              : { ok:true }
       );
     }
 
-    // どちらの方式でも変わらない → トークンは温存（再実行できるように）
-    return sendFail("memberstack_not_applied", debug ? { tried:"A→B", aErr, bErr, aPayload, bPayload, beforeEmail, afterEmail, setTo } : undefined);
+    // 反映されない → トークン温存
+    return sendFail("memberstack_not_applied",
+      debug ? { tried:"A→B", aErr, bErr, aPayload, bPayload, beforeEmail, afterEmail, setTo } : undefined
+    );
 
   } catch (err) {
     const msg = err?.message || String(err);
