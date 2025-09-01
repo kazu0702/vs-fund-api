@@ -12,7 +12,7 @@ const WEBFLOW_BASE = "https://hau2tdnn1x.webflow.io";
 const SUCCESS_URL  = process.env.EMAIL_CHANGE_SUCCESS_URL || `${WEBFLOW_BASE}/email-change-success`;
 const FAILED_URL   = process.env.EMAIL_CHANGE_FAILED_URL  || `${WEBFLOW_BASE}/email-change-failed`;
 
-// ===== メールの“確認リンク”は API 直叩き（?r=1 でリダイレクト） =====
+// ===== メール内リンクは API 直叩き（?r=1 でリダイレクト） =====
 const API_CONFIRM_BASE =
   process.env.EMAIL_CHANGE_API_CONFIRM_BASE ||
   "https://vs-fund-api.onrender.com/api/emailChange/confirm";
@@ -26,7 +26,7 @@ if (process.env.SENDGRID_API_KEY) {
 }
 
 /*───────────────────────────────────────────────
-  1) 変更リクエスト発行
+  1) リクエスト発行
 ───────────────────────────────────────────────*/
 router.post("/request", async (req, res) => {
   try {
@@ -44,10 +44,8 @@ router.post("/request", async (req, res) => {
       [token, userId, newEmail, expires]
     );
 
-    // 確認URL（API直リンク・リダイレクト有効化）
     const confirmUrl = `${API_CONFIRM_BASE}?token=${encodeURIComponent(token)}&r=1`;
 
-    // 送信（キーがなければスキップ）
     if (process.env.SENDGRID_API_KEY) {
       const html = `
         <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#212121">
@@ -86,28 +84,29 @@ router.post("/request", async (req, res) => {
 });
 
 /*───────────────────────────────────────────────
-  2) 確認：SELECT → Memberstack更新 → DELETE
-     ?r=1 なら JSON の代わりに 302 で Webflow へリダイレクト
+  2) 確認：SELECT →（更新前メール取得）→ Memberstack更新 → DELETE
+     ?r=1 なら 302 で Webflow へ
+     DEBUG_EMAIL_CHANGE=true のときは JSON に before/after を含める
 ───────────────────────────────────────────────*/
 router.get("/confirm", async (req, res) => {
   const { token, r } = req.query || {};
   const wantRedirect = String(r) === "1";
   const debug = process.env.DEBUG_EMAIL_CHANGE === "true";
 
-  const goFail = (reason, message) => {
+  const sendFail = (reason, message) => {
     if (wantRedirect) {
       const u = new URL(FAILED_URL);
       if (reason)  u.searchParams.set("reason", reason);
-      res.redirect(302, u.toString());
-      return;
+      return res.redirect(302, u.toString());
     }
-    res.status(400).json(debug ? { ok:false, reason, message } : { ok:false, reason });
+    return res
+      .status(400)
+      .json(debug ? { ok:false, reason, message } : { ok:false, reason });
   };
 
   try {
-    if (!token) return goFail("missing_token");
+    if (!token) return sendFail("missing_token");
 
-    // 1) 取得（まだ削除しない）
     const sel = await db.query(
       `SELECT user_id, new_email
          FROM email_change
@@ -115,26 +114,49 @@ router.get("/confirm", async (req, res) => {
         LIMIT 1`,
       [token]
     );
-    if (sel.rowCount === 0) return goFail("invalid_or_expired");
+    if (sel.rowCount === 0) return sendFail("invalid_or_expired");
 
     const rec = sel.rows[0];
 
-    // 2) Memberstack 更新
+    // 更新前メールを取得（デバッグ用）
+    let beforeEmail = null;
+    try {
+      const m0 = await ms.members.retrieve({ id: rec.user_id });
+      beforeEmail = m0?.email || null;
+    } catch (e) {
+      console.warn("[emailChange/confirm] could not read before email:", e?.message || e);
+    }
+
+    // Memberstack 更新
     try {
       await ms.members.update({ id: rec.user_id, email: rec.new_email });
     } catch (e) {
       const msg = e?.message || String(e);
       console.error("[emailChange/confirm] memberstack update error:", msg);
-      return goFail("memberstack_error", debug ? msg : undefined);
+      return sendFail("memberstack_error", debug ? msg : undefined);
     }
 
-    // 3) 成功したのでトークン消費
+    // 更新後メールを再取得（デバッグ用）
+    let afterEmail = null;
+    try {
+      const m1 = await ms.members.retrieve({ id: rec.user_id });
+      afterEmail = m1?.email || null;
+    } catch (e) {
+      console.warn("[emailChange/confirm] could not read after email:", e?.message || e);
+    }
+
+    // 成功したのでトークン消費
     await db.query(`DELETE FROM email_change WHERE token=$1`, [token]);
 
     if (wantRedirect) {
       return res.redirect(302, SUCCESS_URL);
     }
-    return res.json({ ok:true });
+    // JSON で返す（DEBUG のときだけ詳細を含める）
+    return res.json(
+      debug
+        ? { ok:true, userId: rec.user_id, beforeEmail, afterEmail, setTo: rec.new_email }
+        : { ok:true }
+    );
   } catch (err) {
     console.error("[emailChange/confirm] error:", err);
     return wantRedirect ? res.redirect(302, FAILED_URL) : res.status(500).json({ ok:false, reason:"server_error" });
