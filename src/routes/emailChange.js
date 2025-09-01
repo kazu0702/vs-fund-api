@@ -5,9 +5,7 @@ const crypto = require("crypto");
 const MemberstackAdmin = require("@memberstack/admin");
 const sgMail = require("@sendgrid/mail");
 
-// ※ ここが今回のポイント：controllers への参照パスを厳密に
 const controller = require("../controllers/emailChangeController");
-
 const ms = MemberstackAdmin.init(process.env.MS_SECRET);
 
 // ===== Webflow のページURL（リダイレクト先） =====
@@ -90,5 +88,25 @@ router.post("/request", async (req, res) => {
   2) 確認（controllers/… に委譲）
 ───────────────────────────────────────────────*/
 router.get("/confirm", controller.confirmEmailChange);
+
+/*───────────────────────────────────────────────
+  3) 追加（読み取り用の簡易デバッグAPI）
+     GET /api/emailChange/peek?userId=...
+     → Memberstack の現在値を返すだけ
+───────────────────────────────────────────────*/
+router.get("/peek", async (req, res) => {
+  try {
+    const { userId } = req.query || {};
+    if (!userId) return res.status(400).json({ ok:false, error:"missing_userId" });
+
+    const m = await ms.members.retrieve({ id: userId });
+    const authEmail = m?.data?.auth?.email ?? null;
+    const legacy    = m?.data?.email ?? null;
+
+    return res.json({ ok:true, userId, authEmail, legacy });
+  } catch (e) {
+    return res.status(500).json({ ok:false, error:"peek_error", message: e?.message });
+  }
+});
 
 module.exports = router;
