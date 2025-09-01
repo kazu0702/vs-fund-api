@@ -2,15 +2,14 @@
 const db = require("../db");
 const MemberstackAdmin = require("@memberstack/admin");
 
-// ← 文字列で初期化（peek と同じ方式に統一）
+// peek と同じ：文字列で初期化
 const ms = MemberstackAdmin.init(process.env.MS_SECRET);
 
 /**
  * GET /api/emailChange/confirm?token=...&r=1&d=1
- * - token が有効なら Memberstack の email を更新
- * - まず { email } 単体で更新 → 反映を確認
- * - 反映されなければ { auth: { email } } も試す
- * - d=1 でデバッグ（payload/err も返す）。反映できなければトークンは残す
+ * 1) token を検証
+ * 2) Memberstack のメールを更新（優先: updateEmail / 次点: update({email}) / 最後: update({auth:{email}})）
+ * 3) 反映確認できたら token を削除。確認できなければ token は温存
  */
 exports.confirmEmailChange = async (req, res) => {
   const { token, r, d } = req.query || {};
@@ -35,7 +34,7 @@ exports.confirmEmailChange = async (req, res) => {
   try {
     if (!token) return sendFail("missing_token");
 
-    // 有効トークン読込
+    // 1) トークンの検証
     const sel = await db.query(
       `SELECT user_id, new_email
          FROM email_change
@@ -46,7 +45,7 @@ exports.confirmEmailChange = async (req, res) => {
     if (sel.rowCount === 0) return sendFail("invalid_or_expired");
 
     const userId = sel.rows[0].user_id;
-    const setTo  = sel.rows[0].new_email;
+    const setTo  = String(sel.rows[0].new_email || "").trim().toLowerCase(); // 小文字で統一
 
     // 現在メールの取得関数
     const getEmail = async () => {
@@ -55,52 +54,58 @@ exports.confirmEmailChange = async (req, res) => {
         return r?.data?.auth?.email ?? r?.data?.email ?? null;
       } catch { return null; }
     };
-
     const beforeEmail = await getEmail();
 
-    // 方式A：email 単体（1系互換）
+    // 2) 更新手順（A→B→C）
+    // A: 専用API（推奨）
     let aErr = null, aPayload = null;
     try {
-      aPayload = await ms.members.update({ id: userId, email: setTo });
-    } catch (e) {
-      aErr = e?.message || String(e);
-    }
+      if (typeof ms.members.updateEmail === "function") {
+        aPayload = await ms.members.updateEmail({ memberId: userId, email: setTo });
+      } else {
+        aErr = "updateEmail method not available";
+      }
+    } catch (e) { aErr = e?.message || String(e); }
 
-    await new Promise(s => setTimeout(s, 600));
+    await new Promise(s => setTimeout(s, 700));
     let afterEmail = await getEmail();
-
     if (afterEmail === setTo) {
       await db.query(`DELETE FROM email_change WHERE token = $1`, [token]);
       if (wantRedirect && !debug) return res.redirect(302, SUCCESS_URL);
-      return res.json(
-        debug ? { ok:true, userId, beforeEmail, afterEmail, setTo, tried:"A(email)", aErr, aPayload }
-              : { ok:true }
-      );
+      return res.json(debug ? { ok:true, userId, beforeEmail, afterEmail, setTo, tried:"A(updateEmail)", aErr, aPayload } : { ok:true });
     }
 
-    // 方式B：auth.email（2系）
+    // B: 互換ルート（email 単体）
     let bErr = null, bPayload = null;
     try {
-      bPayload = await ms.members.update({ id: userId, auth: { email: setTo } });
-    } catch (e) {
-      bErr = e?.message || String(e);
-    }
+      bPayload = await ms.members.update({ id: userId, email: setTo });
+    } catch (e) { bErr = e?.message || String(e); }
 
-    await new Promise(s => setTimeout(s, 600));
+    await new Promise(s => setTimeout(s, 700));
     afterEmail = await getEmail();
-
     if (afterEmail === setTo) {
       await db.query(`DELETE FROM email_change WHERE token = $1`, [token]);
       if (wantRedirect && !debug) return res.redirect(302, SUCCESS_URL);
-      return res.json(
-        debug ? { ok:true, userId, beforeEmail, afterEmail, setTo, tried:"A→B", aErr, bErr, aPayload, bPayload }
-              : { ok:true }
-      );
+      return res.json(debug ? { ok:true, userId, beforeEmail, afterEmail, setTo, tried:"A→B", aErr, bErr, aPayload, bPayload } : { ok:true });
     }
 
-    // 反映されない → トークン温存
+    // C: 2.0 プロパティ（auth.email）
+    let cErr = null, cPayload = null;
+    try {
+      cPayload = await ms.members.update({ id: userId, auth: { email: setTo } });
+    } catch (e) { cErr = e?.message || String(e); }
+
+    await new Promise(s => setTimeout(s, 700));
+    afterEmail = await getEmail();
+    if (afterEmail === setTo) {
+      await db.query(`DELETE FROM email_change WHERE token = $1`, [token]);
+      if (wantRedirect && !debug) return res.redirect(302, SUCCESS_URL);
+      return res.json(debug ? { ok:true, userId, beforeEmail, afterEmail, setTo, tried:"A→B→C", aErr, bErr, cErr, aPayload, bPayload, cPayload } : { ok:true });
+    }
+
+    // 反映されず → トークン温存
     return sendFail("memberstack_not_applied",
-      debug ? { tried:"A→B", aErr, bErr, aPayload, bPayload, beforeEmail, afterEmail, setTo } : undefined
+      debug ? { tried:"A→B→C", aErr, bErr, cErr, beforeEmail, afterEmail, setTo, aPayload, bPayload, cPayload } : undefined
     );
 
   } catch (err) {
