@@ -1,75 +1,88 @@
 // src/routes/emailChange.js
-const router  = require("express").Router();
-const db      = require("../db");
-const crypto  = require("crypto");
-const { confirmEmailChange } = require("../controllers/emailChangeController");
+const router = require("express").Router();
+const db     = require("../db");
+const crypto = require("crypto");
+const memberstack = require("@memberstack/admin");
 
-// --- SendGrid 設定 ---
-const sgMail = require("@sendgrid/mail");
-if (!process.env.SENDGRID_API_KEY) {
-  console.warn("[WARN] SENDGRID_API_KEY is not set. Emails will fail.");
-} else {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-}
+// Memberstack Admin 初期化（環境変数 MS_SECRET 必須）
+memberstack.init({ secret: process.env.MS_SECRET });
 
-/* ① 変更リクエスト受付 ------------------------------------ */
+/**
+ * 1) 変更リクエスト発行
+ * POST /api/emailChange/request
+ * body: { userId, newEmail }
+ * - ランダムなトークンを発行して email_change テーブルに保存
+ * - （任意）SendGrid 等で確認メール送信
+ */
 router.post("/request", async (req, res) => {
   try {
-    console.log("[DEBUG] /emailChange/request", req.body);
-
-    // userId でも memberId でも受ける（どちらか必須）
-    const { userId, memberId, newEmail } = req.body || {};
-    const id = userId || memberId;
-    if (!id || !newEmail) {
-      return res.status(400).json({ ok:false, error: "memberId(or userId) and newEmail are required" });
-    }
+    const { userId, newEmail } = req.body;
+    if (!userId || !newEmail) return res.status(400).json({ ok: false, error: "missing_params" });
 
     const token   = crypto.randomUUID();
-    const expires = new Date(Date.now() + 60*60*1000);   // 1 時間
+    const expires = new Date(Date.now() + 1000 * 60 * 60); // 1時間
 
-    // DB のカラム名に合わせて member_id を使用
     await db.query(
-      `INSERT INTO email_change (token, member_id, new_email, expires_at)
-       VALUES ($1,$2,$3,$4)`,
-      [token, id, newEmail, expires]
+      `INSERT INTO email_change(token, user_id, new_email, expires_at)
+       VALUES ($1, $2, $3, $4)`,
+      [token, userId, newEmail, expires]
     );
 
-    // 確認リンク（Webflowの新ドメイン）
-    const confirmUrl = `https://hau2tdnn1x.webflow.io/email-change-confirm?token=${token}`;
+    // ====== ここで確認メール送信（例: SendGrid）======
+    // const sgMail = require("@sendgrid/mail");
+    // sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+    // const confirmUrl = `https://vsfund.webflow.io/email-change-confirm?token=${token}`;
+    // await sgMail.send({
+    //   to: newEmail,
+    //   from: "no-reply@vs-fund.or.jp",
+    //   subject: "メールアドレス変更の確認",
+    //   html: `<p>下記リンクをクリックして変更を完了してください。</p>
+    //          <a href="${confirmUrl}">${confirmUrl}</a>`
+    // });
+    // ================================================
 
-    // 送信（認証済み送信者を利用）
-    if (process.env.SENDGRID_API_KEY) {
-      await sgMail.send({
-        to: newEmail,
-        from: {
-          email: "k-hirai@hirai-syoji.com",
-          name: "Victim Support Fund（VSファンド）"
-        },
-        replyTo: {
-          email: "k-hirai@hirai-syoji.com",
-          name: "Victim Support Fund（VSファンド）"
-        },
-        subject: "メールアドレス変更の確認",
-        html: `<p>下記リンクをクリックして変更を完了してください。</p>
-               <p><a href="${confirmUrl}">${confirmUrl}</a></p>
-               <p>※このリンクは1時間で期限切れになります。</p>`,
-        // 追跡リンク無効化（URL改変防止・任意）
-        mailSettings: { clickTracking: { enable: false, enableText: false } }
-      });
-      console.log("[emailChange] Sent email:", confirmUrl);
-    } else {
-      console.warn("[WARN] SENDGRID_API_KEY missing, skipped email. URL:", confirmUrl);
-    }
-
-    res.json({ ok:true });
+    return res.json({ ok: true });
   } catch (err) {
-    console.error("[emailChange] Error:", err);
-    res.status(500).json({ ok:false, error: err.message });
+    console.error("[emailChange/request] error:", err);
+    return res.status(500).json({ ok: false, error: "server_error" });
   }
 });
 
-/* ② 確認リンク -------------------------------------------- */
-// /api/emailChange/confirm?token=xxxx
-router.get("/confirm", confirmEmailChange);
+/**
+ * 2) 確認（トークン消費）
+ * GET /api/emailChange/confirm?token=...
+ * - 有効トークンを1回で削除しつつ取得
+ * - Memberstack のメールを new_email に更新
+ * - JSON を返す（フロント側で成功/失敗ページへリダイレクト）
+ */
+router.get("/confirm", async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ ok: false, reason: "missing_token" });
+
+    // 有効トークンを取り出して同時に削除（1回限り）
+    const { rows } = await db.query(
+      `DELETE FROM email_change
+         WHERE token = $1
+           AND expires_at > NOW()
+       RETURNING user_id, new_email`,
+      [token]
+    );
+
+    if (rows.length === 0) {
+      return res.status(400).json({ ok: false, reason: "invalid_or_expired" });
+    }
+
+    const rec = rows[0];
+
+    // Memberstack のメール更新
+    await memberstack.members.update({ id: rec.user_id, email: rec.new_email });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error("[emailChange/confirm] error:", err);
+    return res.status(500).json({ ok: false, reason: "server_error" });
+  }
+});
 
 module.exports = router;
