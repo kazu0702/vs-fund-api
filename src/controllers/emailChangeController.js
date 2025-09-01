@@ -6,16 +6,14 @@ const ms = MemberstackAdmin.init(process.env.MS_SECRET);
 
 /**
  * GET /api/emailChange/confirm?token=...&r=1&d=1
- * - token が有効なら Memberstack の auth.email を更新
- * - ?r=1 の場合は Webflow 成功/失敗ページへ 302 リダイレクト
- * - ?d=1 の場合は強制デバッグ出力（before/after など）を JSON で返す
+ * - token が有効なら Memberstack の email を更新
+ * - ?r=1 なら Webflow の成功/失敗ページに 302 リダイレクト
+ * - ?d=1 ならデバッグ JSON（before/after など）を返す
  */
 exports.confirmEmailChange = async (req, res) => {
   const { token, r, d } = req.query || {};
   const wantRedirect = String(r) === "1";
-  const forceDebug   = String(d) === "1";
-  const envDebug     = process.env.DEBUG_EMAIL_CHANGE === "true";
-  const debug        = forceDebug || envDebug;
+  const debug        = String(d) === "1" || process.env.DEBUG_EMAIL_CHANGE === "true";
 
   const WEBFLOW_BASE = "https://hau2tdnn1x.webflow.io";
   const SUCCESS_URL  = process.env.EMAIL_CHANGE_SUCCESS_URL || `${WEBFLOW_BASE}/email-change-success`;
@@ -35,7 +33,7 @@ exports.confirmEmailChange = async (req, res) => {
   try {
     if (!token) return sendFail("missing_token");
 
-    // トークン検証（有効期限内のものを取得）
+    // 有効トークンを取得
     const sel = await db.query(
       `SELECT user_id, new_email
          FROM email_change
@@ -44,42 +42,30 @@ exports.confirmEmailChange = async (req, res) => {
       [token]
     );
     if (sel.rowCount === 0) return sendFail("invalid_or_expired");
+    const { user_id: userId, new_email: setTo } = sel.rows[0];
 
-    const rec = sel.rows[0];
-
-    // 更新前メールを取得
+    // 更新前メールの取得
     let beforeEmail = null;
     try {
-      const m0 = await ms.members.retrieve({ id: rec.user_id });
+      const m0 = await ms.members.retrieve({ id: userId });
+      // auth.email が表示上の実メール。旧フィールドは m0.data.email のことも
       beforeEmail = m0?.data?.auth?.email ?? m0?.data?.email ?? null;
-    } catch (e) {
-      beforeEmail = null;
-    }
+    } catch (_) {}
 
-    // Memberstack 更新（auth.email → 旧SDK互換で email もフォールバック）
-    try {
-      // まず auth.email を試す（MS2.0）
-      await ms.members.update({ id: rec.user_id, auth: { email: rec.new_email } });
-    } catch (e1) {
-      // 失敗したら旧フィールドでも試行
-      try {
-        await ms.members.update({ id: rec.user_id, email: rec.new_email });
-      } catch (e2) {
-        const msg = `auth.email:${e1?.message || e1} / email:${e2?.message || e2}`;
-        return sendFail("memberstack_error", debug ? msg : undefined);
-      }
-    }
+    // —— ここが本丸：email 単体で更新 ——
+    await ms.members.update({ id: userId, email: setTo });
 
-    // 更新後メールを再取得
+    // 反映に僅かなタイムラグが出ることがあるので 500ms 待ってから再取得
+    await new Promise(r => setTimeout(r, 500));
+
+    // 更新後メールの取得
     let afterEmail = null;
     try {
-      const m1 = await ms.members.retrieve({ id: rec.user_id });
+      const m1 = await ms.members.retrieve({ id: userId });
       afterEmail = m1?.data?.auth?.email ?? m1?.data?.email ?? null;
-    } catch (e) {
-      afterEmail = null;
-    }
+    } catch (_) {}
 
-    // 使い終わったトークンは削除
+    // トークンを消費
     await db.query(`DELETE FROM email_change WHERE token = $1`, [token]);
 
     if (wantRedirect && !debug) {
@@ -87,12 +73,13 @@ exports.confirmEmailChange = async (req, res) => {
     }
     return res.json(
       debug
-        ? { ok:true, userId: rec.user_id, beforeEmail, afterEmail, setTo: rec.new_email }
+        ? { ok:true, userId, beforeEmail, afterEmail, setTo }
         : { ok:true }
     );
   } catch (err) {
+    const message = err?.message || String(err);
     return wantRedirect && !debug
       ? res.redirect(302, FAILED_URL)
-      : res.status(500).json({ ok:false, reason:"server_error", message: (process.env.DEBUG_EMAIL_CHANGE === "true" ? err?.message : undefined) });
+      : res.status(500).json({ ok:false, reason:"server_error", message: (debug ? message : undefined) });
   }
 };
