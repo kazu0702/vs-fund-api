@@ -84,7 +84,7 @@ router.post("/request", async (req, res) => {
 });
 
 /*───────────────────────────────────────────────
-  2) 確認：SELECT →（更新前メール取得）→ Memberstack更新 → DELETE
+  2) 確認：SELECT →（更新前メール取得）→ Memberstack更新(auth.email) → DELETE
      ?r=1 なら 302 で Webflow へ
      DEBUG_EMAIL_CHANGE=true のときは JSON に before/after を含める
 ───────────────────────────────────────────────*/
@@ -122,14 +122,14 @@ router.get("/confirm", async (req, res) => {
     let beforeEmail = null;
     try {
       const m0 = await ms.members.retrieve({ id: rec.user_id });
-      beforeEmail = m0?.email || null;
+      beforeEmail = m0?.data?.auth?.email ?? null;
     } catch (e) {
       console.warn("[emailChange/confirm] could not read before email:", e?.message || e);
     }
 
-    // Memberstack 更新
+    // ここを修正：auth.email に書く
     try {
-      await ms.members.update({ id: rec.user_id, email: rec.new_email });
+      await ms.members.update({ id: rec.user_id, auth: { email: rec.new_email } });
     } catch (e) {
       const msg = e?.message || String(e);
       console.error("[emailChange/confirm] memberstack update error:", msg);
@@ -140,7 +140,7 @@ router.get("/confirm", async (req, res) => {
     let afterEmail = null;
     try {
       const m1 = await ms.members.retrieve({ id: rec.user_id });
-      afterEmail = m1?.email || null;
+      afterEmail = m1?.data?.auth?.email ?? null;
     } catch (e) {
       console.warn("[emailChange/confirm] could not read after email:", e?.message || e);
     }
@@ -151,7 +151,6 @@ router.get("/confirm", async (req, res) => {
     if (wantRedirect) {
       return res.redirect(302, SUCCESS_URL);
     }
-    // JSON で返す（DEBUG のときだけ詳細を含める）
     return res.json(
       debug
         ? { ok:true, userId: rec.user_id, beforeEmail, afterEmail, setTo: rec.new_email }
